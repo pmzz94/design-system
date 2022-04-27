@@ -78,7 +78,24 @@
             </div>
           </template>
           <template v-else>
-            <div class="tooltip__box__footer__ghost-element"></div>
+            <div class="tooltip__box__footer__btn-prev">
+              <BIMDataButton
+                width="0px"
+                height="0px"
+                color="primary"
+                fill
+                radius
+                @click="clickPrev"
+              >
+                <BIMDataIcon
+                  name="chevron"
+                  size="xxs"
+                  fill
+                  color="white"
+                  :rotate="180"
+                />
+              </BIMDataButton>
+            </div>
           </template>
           <div class="tooltip__box__footer__step-counter">
             <span>{{ stepIndex + 1 }}</span>
@@ -148,12 +165,17 @@ export default {
       type: Number,
       default: () => 10000,
     },
+    router: {
+      type: Object,
+    },
   },
   emits: ["set-completed-tour"],
   data() {
     return {
       steps: [],
+      observer: null,
       showGuidedTour: false,
+      movingForward: true,
       currentTarget: null,
       showSpotlight: true,
       showTooltip: false,
@@ -167,6 +189,9 @@ export default {
     },
     nextStep() {
       return this.steps[this.stepIndex + 1];
+    },
+    prevStep() {
+      return this.steps[this.stepIndex - 1];
     },
     centeredTooltip() {
       return this.currentStep && !this.currentStep.target;
@@ -190,12 +215,25 @@ export default {
           this.currentTarget = this.getDomElements(step);
         } else {
           // display a centered tooltip
+          this.showSpotlight = true;
           this.showTooltip = true;
           return;
         }
 
         if (step.clickable) {
-          this.clickListener();
+          (
+            this.currentTarget.elementToClick || this.currentTarget.element
+          ).addEventListener(
+            "click",
+            () => {
+              if (this.nextStep.target) {
+                this.mutationObserverManager();
+              } else {
+                this.next();
+              }
+            },
+            { once: true }
+          );
         }
 
         scrollToTarget(this.currentTarget.element, this.elementToObserve);
@@ -208,9 +246,6 @@ export default {
         this.closeGuidedTour();
       }
     },
-  },
-  created() {
-    this.mutationObserver = new MutationObserver(this.handleClickedStep);
   },
   mounted() {
     const tour = this.tours.find(t => t.name === this.tourToDisplay);
@@ -237,6 +272,31 @@ export default {
       }
       this.resetSettings();
     },
+    clickPrev() {
+      this.movingForward = false;
+      if (this.prevStep.clickable) {
+        if (this.prevStep.routeName) {
+          // eslint-disable-next-line vue/no-mutating-props
+          this.router.push({ name: this.prevStep.routeName });
+          this.mutationObserverManager();
+        } else {
+          const { elementToClick, element } = this.getDomElements(
+            this.prevStep
+          );
+          (elementToClick || element).addEventListener(
+            "click",
+            () => {
+              this.mutationObserverManager(this.prevStep, this.prev);
+            },
+            { once: true }
+          );
+          (elementToClick || element).click();
+        }
+      } else {
+        this.prev();
+      }
+      this.resetSettings();
+    },
     openGuidedTour(arg) {
       this.steps = arg.map(step => {
         return {
@@ -247,7 +307,14 @@ export default {
       this.showGuidedTour = true;
     },
     getDomElements(step, elementToWatch = document) {
-      const { target, targetDetail, targetToClick, targetToClickDetail } = step;
+      const {
+        target,
+        targetDetail,
+        targetToClick,
+        targetToClickDetail,
+        targetToClickBack,
+        targetToClickBackDetail,
+      } = step;
 
       let element, elementToClick;
 
@@ -260,14 +327,22 @@ export default {
           `[data-guide=${target}] ${targetDetail ? targetDetail : ""}`
         );
       }
-
-      if (targetToClick) {
+      if (
+        targetToClick ||
+        (!this.movingForward && (targetToClickBack || targetToClickBackDetail))
+      ) {
         elementToClick = elementToWatch.querySelector(
-          `[data-guide-click=${targetToClick}] ${
-            targetToClickDetail ? targetToClickDetail : ""
+          `[data-guide-click=${targetToClickBack || targetToClick}] ${
+            targetToClickBackDetail
+              ? targetToClickBackDetail
+              : targetToClickDetail
+              ? targetToClickDetail
+              : ""
           }`
         );
       }
+      console.log("element", element);
+      console.log("elementToClick", elementToClick);
 
       return {
         element,
@@ -281,12 +356,16 @@ export default {
     next() {
       this.stepIndex++;
     },
+    prev() {
+      this.stepIndex--;
+    },
     close() {
       this.showTooltip = false;
       this.closeGuidedTour();
       this.$emit("set-completed-tour", this.tourToDisplay);
     },
     resetSettings() {
+      this.movingForward = true;
       this.currentTarget = null;
 
       this.showSpotlight = false;
@@ -294,39 +373,41 @@ export default {
 
       this.$refs.tooltip.style.removeProperty("left");
       this.$refs.tooltip.style.removeProperty("top");
+
+      this.$refs.spotlight.style.removeProperty("height");
+      this.$refs.spotlight.style.removeProperty("width");
+      this.$refs.spotlight.style.removeProperty("left");
+      this.$refs.spotlight.style.removeProperty("top");
     },
-    clickListener() {
-      (
-        this.currentTarget.elementToClick || this.currentTarget.element
-      ).addEventListener(
-        "click",
-        () => {
-          if (this.nextStep.target) {
-            this.mutationObserver.observe(this.elementToObserve, {
-              childList: true,
-              subtree: true,
-            });
-          } else {
-            this.next();
-          }
-        },
-        { once: true }
+    mutationObserverManager() {
+      const stepToReach = this.movingForward ? this.nextStep : this.prevStep;
+      const goToStep = this.movingForward ? this.next : this.prev;
+
+      this.observer = new MutationObserver(() =>
+        this.domToDisplay(stepToReach, goToStep)
       );
+      this.observer.observe(this.elementToObserve, {
+        childList: true,
+        subtree: true,
+      });
     },
-    handleClickedStep() {
-      const { element } = this.getDomElements(
-        this.nextStep,
+
+    domToDisplay(stepToReach, goToStep) {
+      const { element, elementToClick } = this.getDomElements(
+        stepToReach,
         this.elementToObserve
       );
 
-      const isAnHTMLElement = element instanceof HTMLElement;
-      const isAnArrayOfHTMLElement =
-        Array.isArray(element) &&
-        element.every(elem => elem instanceof HTMLElement);
+      console.log("elementToClick in domToDisplay", elementToClick);
 
-      if (isAnHTMLElement || isAnArrayOfHTMLElement) {
-        this.next();
-        this.mutationObserver.disconnect();
+      const isAnHTMLElement = elem => elem instanceof HTMLElement;
+
+      const isAnArrayOfHTMLElement = elem =>
+        Array.isArray(elem) && element.every(e => e instanceof HTMLElement);
+
+      if (isAnHTMLElement(element) || isAnArrayOfHTMLElement(element)) {
+        goToStep();
+        this.observer.disconnect();
       }
     },
   },

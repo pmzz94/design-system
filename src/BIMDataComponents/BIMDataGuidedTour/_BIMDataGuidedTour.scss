@@ -18,6 +18,7 @@
     height: 362px;
     border-radius: 2px;
     background-color: white;
+    box-shadow: var(--box-shadow);
 
     display: flex;
     flex-direction: column;
@@ -73,11 +74,8 @@
   
       &__footer {
         display: flex;
+        justify-content: space-between;
         margin-top: var(--spacing-unit);
-  
-        &__ghost-element {
-          flex: 1
-        }
       
         &__step-counter {
           span:first-of-type {
@@ -89,9 +87,9 @@
           }
         }
   
-        &__btn-skip, &__btn-start {
-          flex: 1;
-          margin: auto;
+        &__btn-skip, &__btn-prev, &__btn-start {
+          display: flex;
+          align-items: center;
   
           button {
             padding: 0px;
@@ -106,10 +104,15 @@
         &__btn-start > button {
           margin-left: auto;
         }
+
+        &__btn-prev {
+          button {
+            padding: 10px;
+            margin-right: auto;
+          }
+        }
   
         &__btn-next {
-          flex: 1;
-  
           button {
             padding: 10px;
             margin-left: auto;
